@@ -198,43 +198,119 @@ export default function ChatUI({ onLock }: { onLock: () => void }) {
 }
 
 function renderRichText(text: string, onDark: boolean): React.ReactNode {
-  // Minimal inline renderer: **bold**, [label](url), raw URLs.
-  // Splits the string into segments while preserving order.
-  const nodes: React.ReactNode[] = [];
-  const pattern = /(\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s)]+)/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  let key = 0;
-  const linkClass = onDark
-    ? "underline decoration-white/70 underline-offset-2 hover:decoration-white"
-    : "text-[var(--color-wr-blue)] underline decoration-[var(--color-wr-blue)]/40 underline-offset-2 hover:decoration-[var(--color-wr-blue)]";
+  // Handles (in priority order):
+  //   **[label](url)**  -> button-pill link (bold link)
+  //   [label](url)      -> inline styled link
+  //   **bold**          -> <strong>
+  //   https://...       -> auto-linked URL (stripped to hostname for display)
+  const boldLink = /\*\*\[([^\]]+)\]\(([^)]+)\)\*\*/;
+  const mdLink = /\[([^\]]+)\]\(([^)]+)\)/;
+  const bold = /\*\*([^*]+?)\*\*/;
+  const rawUrl = /(https?:\/\/[^\s)\]]+)/;
 
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      nodes.push(text.slice(lastIndex, match.index));
+  type Match = { index: number; length: number; node: React.ReactNode };
+  const inlineLinkClass = onDark
+    ? "underline decoration-white/70 underline-offset-2 hover:decoration-white font-medium"
+    : "text-[var(--color-wr-blue)] underline decoration-[var(--color-wr-blue)]/40 underline-offset-2 hover:decoration-[var(--color-wr-blue)] font-medium";
+
+  const pillClass =
+    "inline-flex items-center gap-1.5 my-0.5 px-3.5 py-1.5 rounded-full bg-[var(--color-wr-blue)] text-white text-[13px] font-semibold no-underline hover:brightness-95 transition align-baseline";
+  const pillClassOnDark =
+    "inline-flex items-center gap-1.5 my-0.5 px-3.5 py-1.5 rounded-full bg-white text-[var(--color-wr-blue)] text-[13px] font-semibold no-underline hover:brightness-95 transition align-baseline";
+
+  const nodes: React.ReactNode[] = [];
+  let key = 0;
+  let cursor = 0;
+
+  while (cursor < text.length) {
+    const slice = text.slice(cursor);
+
+    const candidates: Match[] = [];
+
+    const bl = slice.match(boldLink);
+    if (bl && bl.index !== undefined) {
+      candidates.push({
+        index: bl.index,
+        length: bl[0].length,
+        node: (
+          <a
+            key={key++}
+            href={bl[2]}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={onDark ? pillClassOnDark : pillClass}
+          >
+            {bl[1]}
+            <svg viewBox="0 0 16 16" className="w-3 h-3" fill="currentColor" aria-hidden="true">
+              <path d="M6 2v2h4.586l-7.293 7.293 1.414 1.414L12 5.414V10h2V2H6z" />
+            </svg>
+          </a>
+        ),
+      });
     }
-    const token = match[0];
-    if (token.startsWith("**") && token.endsWith("**")) {
-      nodes.push(<strong key={key++}>{token.slice(2, -2)}</strong>);
-    } else if (token.startsWith("[")) {
-      const labelEnd = token.indexOf("](");
-      const label = token.slice(1, labelEnd);
-      const url = token.slice(labelEnd + 2, -1);
-      nodes.push(
-        <a key={key++} href={url} target="_blank" rel="noopener noreferrer" className={linkClass}>
-          {label}
-        </a>
-      );
-    } else {
-      nodes.push(
-        <a key={key++} href={token} target="_blank" rel="noopener noreferrer" className={linkClass}>
-          {token}
-        </a>
-      );
+
+    const ml = slice.match(mdLink);
+    if (ml && ml.index !== undefined) {
+      candidates.push({
+        index: ml.index,
+        length: ml[0].length,
+        node: (
+          <a
+            key={key++}
+            href={ml[2]}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={inlineLinkClass}
+          >
+            {ml[1]}
+          </a>
+        ),
+      });
     }
-    lastIndex = match.index + token.length;
+
+    const b = slice.match(bold);
+    if (b && b.index !== undefined) {
+      candidates.push({
+        index: b.index,
+        length: b[0].length,
+        node: <strong key={key++}>{b[1]}</strong>,
+      });
+    }
+
+    const r = slice.match(rawUrl);
+    if (r && r.index !== undefined) {
+      const display = r[1].replace(/^https?:\/\//, "").replace(/\/$/, "");
+      candidates.push({
+        index: r.index,
+        length: r[1].length,
+        node: (
+          <a
+            key={key++}
+            href={r[1]}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={inlineLinkClass}
+          >
+            {display}
+          </a>
+        ),
+      });
+    }
+
+    if (candidates.length === 0) {
+      nodes.push(slice);
+      break;
+    }
+
+    // Pick the earliest-starting match; on tie, longest (so bold-link beats md-link beats bold).
+    candidates.sort((a, b) => (a.index - b.index) || (b.length - a.length));
+    const winner = candidates[0];
+
+    if (winner.index > 0) nodes.push(slice.slice(0, winner.index));
+    nodes.push(winner.node);
+    cursor += winner.index + winner.length;
   }
-  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+
   return nodes;
 }
 
