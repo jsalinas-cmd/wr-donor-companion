@@ -131,7 +131,9 @@ export default function ChatUI({ onLock }: { onLock: () => void }) {
                 }
               >
                 {m.content ? (
-                  <div className="whitespace-pre-wrap text-[15px]">{m.content}</div>
+                  <div className="whitespace-pre-wrap text-[15px]">
+                    {renderRichText(m.content, m.role === "user")}
+                  </div>
                 ) : (
                   <div className="flex gap-1.5 py-1">
                     <span className="typing-dot w-2 h-2 rounded-full bg-[var(--color-wr-blue)]"></span>
@@ -193,6 +195,47 @@ export default function ChatUI({ onLock }: { onLock: () => void }) {
       </div>
     </div>
   );
+}
+
+function renderRichText(text: string, onDark: boolean): React.ReactNode {
+  // Minimal inline renderer: **bold**, [label](url), raw URLs.
+  // Splits the string into segments while preserving order.
+  const nodes: React.ReactNode[] = [];
+  const pattern = /(\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s)]+)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+  const linkClass = onDark
+    ? "underline decoration-white/70 underline-offset-2 hover:decoration-white"
+    : "text-[var(--color-wr-blue)] underline decoration-[var(--color-wr-blue)]/40 underline-offset-2 hover:decoration-[var(--color-wr-blue)]";
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+    const token = match[0];
+    if (token.startsWith("**") && token.endsWith("**")) {
+      nodes.push(<strong key={key++}>{token.slice(2, -2)}</strong>);
+    } else if (token.startsWith("[")) {
+      const labelEnd = token.indexOf("](");
+      const label = token.slice(1, labelEnd);
+      const url = token.slice(labelEnd + 2, -1);
+      nodes.push(
+        <a key={key++} href={url} target="_blank" rel="noopener noreferrer" className={linkClass}>
+          {label}
+        </a>
+      );
+    } else {
+      nodes.push(
+        <a key={key++} href={token} target="_blank" rel="noopener noreferrer" className={linkClass}>
+          {token}
+        </a>
+      );
+    }
+    lastIndex = match.index + token.length;
+  }
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  return nodes;
 }
 
 function WRMark({ className = "" }: { className?: string }) {
